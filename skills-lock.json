@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "binance-agentic-wallet": {
+      "source": "binance/binance-skills-hub",
+      "sourceType": "github",
+      "skillPath": "skills/binance-web3/binance-agentic-wallet/SKILL.md",
+      "computedHash": "a0f79ce297d74f3f91d9322c9cb70a2dafb0effca67da6c4b6231f9537c343b2"
+    },
+    "binance-tokenized-securities-info": {
+      "source": "binance/binance-skills-hub",
+      "sourceType": "github",
+      "skillPath": "skills/binance-web3/binance-tokenized-securities-info/SKILL.md",
+      "computedHash": "a23dc838e5c8aa7841a89cf3531404d98433bf7b57888d7c2238e0eb30d5e743"
+    },
+    "query-address-info": {
+      "source": "binance/binance-skills-hub",
+      "sourceType": "github",
+      "skillPath": "skills/binance-web3/query-address-info/SKILL.md",
+      "computedHash": "1bc0cf82e28f57f7eadab0ffb3bfc261e347f75ba5745fb0e14c6ac33b4e226b"
+    },
+    "query-token-audit": {
+      "source": "binance/binance-skills-hub",
+      "sourceType": "github",
+      "skillPath": "skills/binance-web3/query-token-audit/SKILL.md",
+      "computedHash": "4328d725723b336f0f743359dd4d6fc238c1721bcfe789097ba7201855612ad5"
+    },
+    "query-token-info": {
+      "source": "binance/binance-skills-hub",
+      "sourceType": "github",
+      "skillPath": "skills/binance-web3/query-token-info/SKILL.md",
+      "computedHash": "6e5f8a0614836af492e870f692142b3a28852c6b90e62b16bc38561748a87692"
+    }
+  }
+}

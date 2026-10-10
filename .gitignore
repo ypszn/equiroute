@@ -38,7 +38,25 @@ yarn-error.log*
 # vercel
 .vercel
 
-# typescript
+# local smoke-test captures and generated agent workspaces
+/case-*.json
+/.agents/
+/.claude/
+/.cursor/
+/.kilo/
+/.kilocode/
+
+# local Agentic Wallet / Studio secrets and wallet stores
+**/.studio/wallets/
+**/*keystore*.json
+**/*wallet*.json
+**/*credentials*.json
+**/*secrets*.json
+**/.baw/
+
+# redundant root copy; public asset is the served logo
+/equiroute-logo.png
+
 *.tsbuildinfo
 next-env.d.ts
 

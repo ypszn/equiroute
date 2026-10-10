@@ -49,6 +49,3 @@ The routing and preparation handlers use the Node.js runtime because Binance aut
 
 Agent Studio must call this service over HTTPS. Browser CORS is not required for its server-to-server calls; no permissive CORS policy is enabled.
 
-## Secrets and filesystem
-
-The application has no required writable persistent filesystem and no dependency on `../equiroutesentinel`. `.env.local`, private keys, wallet sessions, BAW auth material, and Studio/Pieverse credentials remain ignored and must not be committed.

@@ -1,98 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import { ExposureForm } from "@/components/exposure-form";
-import { QuoteMatrix } from "@/components/quote-matrix";
-import { ExecutionReceipt } from "@/components/execution-receipt";
+import { AgenticWalletPanel } from "@/components/agentic-wallet-panel";
+import { RouteResults } from "@/components/route-results";
+import { PolicyCard } from "@/components/policy-card";
+import { SimulationCard } from "@/components/simulation-card";
+import { ExecutionPipeline } from "@/components/execution-pipeline";
 import type { RouteApiResponse } from "@/modules/routing/api-types";
 import type { PreparationResult } from "@/modules/preparation/types";
-import { AgenticWalletCard } from "@/components/agentic-wallet-card";
+import type { AgenticWalletState } from "@/modules/agentic-wallet/types";
+import type { PolicyDecision } from "@/modules/policy/engine";
+
+type WalletGate = { reconciliation?: { agenticWallet: { outputTokenAmount: string; estimatedUnderlyingShares: string | null }; outcome: string; deviationPercent: string | null } | null; security?: { status: string; acknowledgmentRequired: boolean } | null; executionProposal?: { id: string; readiness: string; blockingReasons: string[]; freshUntil: string } | null };
+function defaultMandate(maxImpact = "1", slippage = "0.5") { return { version: 1, trade: { maxNotionalUsd: "1000", maxPriceImpactPercent: maxImpact, maxSlippagePercent: slippage }, providers: { allowed: null, blocked: [] }, marketRegime: { allowRegular: true, allowPremarket: true, allowPostmarket: true, allowOffhours: true, allowClosed: false, allowPaused: false, allowRestricted: false, requireConfirmationOutsideRegular: true }, verification: { requireVerifiedWrapperRatio: true, requireCanonicalRepresentation: true, requireSimulationSuccess: true }, execution: { requireHumanConfirmation: true } }; }
+function marketUpdatedAt(result: RouteApiResponse | null) { const raw = result?.marketContext?.raw; if (!raw || typeof raw !== "object") return null; const timestamp = (raw as { timestamp?: unknown }).timestamp; return typeof timestamp === "number" || typeof timestamp === "string" ? new Date(Number(timestamp)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null; }
 
 export default function Home() {
-  const [result, setResult] = useState<RouteApiResponse | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [preparation, setPreparation] = useState<PreparationResult | null>(null);
+  const [wallet, setWallet] = useState<AgenticWalletState | null>(null); const [result, setResult] = useState<RouteApiResponse | null>(null); const [preparation, setPreparation] = useState<PreparationResult | null>(null); const [policy, setPolicy] = useState<PolicyDecision | null>(null); const [gate, setGate] = useState<WalletGate | null>(null); const [loading, setLoading] = useState(false); const [walletLoading, setWalletLoading] = useState(false); const [error, setError] = useState("");
+  useEffect(() => { void fetch("/api/agentic-wallet/status").then((r) => r.json()).then(setWallet).catch(() => setWallet(null)); }, []);
+  async function findPolicy(input: { ticker: string; notionalUsd: string; slippagePercent?: string; mandate?: unknown; userWalletAddress?: string }) { try { const response = await fetch("/api/policy/evaluate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, mandate: input.mandate ?? defaultMandate(input.slippagePercent), slippagePercent: input.slippagePercent ?? "0.5" }) }); if (response.ok) setPolicy((await response.json()).policyDecision ?? null); } catch { /* route result remains authoritative */ } }
+  async function prepare(input: { ticker: string; notionalUsd: string; userWalletAddress: string; slippagePercent: string; mandate?: unknown }) { setLoading(true); setError(""); setPreparation(null); try { const response = await fetch("/api/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }); const data = await response.json(); if (!response.ok) throw new Error(data?.detail ?? data?.error ?? `Request failed (${response.status})`); setPreparation(data as PreparationResult); setPolicy(data.policyDecision ?? null); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); } }
+  async function reviewExecution() { setWalletLoading(true); setError(""); try { const response = await fetch("/api/agentic-wallet/execution-gate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticker: result?.intent.ticker ?? "NVDA", notionalUsd: result?.intent.notionalUsd ?? "10", slippagePercent: "0.5", mandate: defaultMandate() }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Review failed"); setGate(data); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setWalletLoading(false); } }
+  const walletStage = preparation?.simulation.failureClassification === "INSUFFICIENT_INPUT_BALANCE" ? { state: "blocked" as const, detail: "Funding required" } : preparation?.executionReadiness ? { state: preparation.executionReadiness.outcome === "ready_for_confirmation" ? "complete" as const : "attention" as const, detail: preparation.executionReadiness.outcome.replaceAll("_", " ") } : wallet?.connection === "connected" ? { state: "attention" as const, detail: "State available; readiness pending" } : wallet ? { state: "attention" as const, detail: "Wallet unavailable" } : { state: "pending" as const, detail: "Awaiting wallet state" };
+  const pipeline = useMemo(() => [
+    { name: "Route Selection", state: result?.selected ? "complete" : loading ? "active" : "pending", detail: result?.selected ? `${result.selected.provider} selected` : "Awaiting intent" },
+    { name: "Policy Evaluation", state: policy ? (policy.outcome === "blocked" ? "blocked" : policy.outcome === "confirmation_required" ? "attention" : "complete") : "pending", detail: policy?.outcome?.replaceAll("_", " ") ?? "Rules apply after analysis" },
+    { name: "Simulation", state: preparation ? (preparation.simulation.status === "success" ? "complete" : preparation.simulation.attempted ? "blocked" : "active") : "pending", detail: preparation?.simulation.failReason ?? preparation?.simulation.status ?? "Not run" },
+    { name: "Wallet Readiness", state: walletStage.state, detail: walletStage.detail },
+    { name: "Review Required", state: gate?.executionProposal ? "active" : "pending", detail: gate?.executionProposal ? gate.executionProposal.readiness.replaceAll("_", " ") : "No proposal" },
+  ] as const, [result, loading, policy, preparation, gate, walletStage.state, walletStage.detail]);
 
-  return (
-    <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black">
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
-        <header>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            EquiRoute
-          </h1>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            You choose the stock. EquiRoute chooses how you own it.
-          </p>
-        </header>
-
-        <AgenticWalletCard />
-        <ExposureForm
-          loading={loading}
-          onLoading={setLoading}
-          onPrepare={async (input) => {
-            setLoading(true);
-            setError("");
-            setPreparation(null);
-            try {
-              const response = await fetch("/api/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
-              const data = await response.json();
-              if (!response.ok) throw new Error(data?.detail ?? data?.error ?? `Request failed (${response.status})`);
-              setPreparation(data as PreparationResult);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
-            } finally {
-              setLoading(false);
-            }
-          }}
-          onError={(m) => {
-            setError(m);
-            setResult(null);
-          }}
-          onResult={(r) => {
-            setResult(r);
-            setError("");
-          }}
-        />
-
-        {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-            {error}
-          </div>
-        )}
-
-        {result && (
-          <>
-            {result.selected && (
-              <div className="rounded-lg border border-emerald-200 bg-white p-4 dark:border-emerald-900 dark:bg-zinc-950">
-                <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Selected route
-                </div>
-                <div className="mt-1 text-lg font-semibold">
-                  {result.selected.provider} / {result.selected.symbol}
-                </div>
-                <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                  {result.selected.estimatedUnderlyingShares ?? "—"} est. shares · $
-                  {result.selected.effectiveUsdPerShare ?? "—"}/share ·{" "}
-                  {result.selected.vendorName ?? "—"}
-                </div>
-              </div>
-            )}
-
-            <QuoteMatrix quotes={result.quotes} />
-            <ExecutionReceipt receipt={result.receipt} />
-            {preparation && <section className="w-full rounded-lg border border-zinc-200 bg-white p-5 text-sm dark:border-zinc-800 dark:bg-zinc-950">
-              <h2 className="font-semibold">Pre-Execution Receipt</h2>
-              <p className="mt-2">Preparation: <strong>{preparation.preparation.status}</strong>{preparation.preparation.reason ? ` — ${preparation.preparation.reason}` : ""}</p>
-              <p>Simulation: <strong>{preparation.simulation.status}</strong>{preparation.simulation.failReason ? ` — ${preparation.simulation.failReason}` : ""}</p>
-              <p>Approval: {preparation.preparation.approval?.status ?? "unknown"}{preparation.preparation.approval?.spender ? ` — spender ${preparation.preparation.approval.spender}` : ""}{preparation.preparation.approval?.amount ? ` — amount ${preparation.preparation.approval.amount}` : ""}</p>
-              <p>Minimum receive: {preparation.preparation.preparedRoute?.transaction?.minReceiveAmount ?? "unknown"} · Slippage: {preparation.intent.slippagePercent}%</p>
-              <div className="mt-3 space-y-1 text-xs text-zinc-600 dark:text-zinc-400">{preparation.safetyChecks.map((check) => <div key={check.name}>{check.status.toUpperCase()} — {check.name}: {check.detail}</div>)}</div>
-              {preparation.preparation.preparedRoute?.transaction && <details className="mt-3"><summary className="cursor-pointer">Advanced unsigned transaction details</summary><pre className="mt-2 overflow-auto text-[10px]">{JSON.stringify(preparation.preparation.preparedRoute.transaction, null, 2)}</pre></details>}
-            </section>}
-          </>
-        )}
-      </main>
-    </div>
-  );
+  return <main className="shell"><header className="container flex items-center justify-between py-5"><a href="#top" className="flex items-center gap-3"><Image src="/equiroute-mark.png" alt="EquiRoute" width={42} height={44} className="h-10 w-10 object-contain sm:h-11 sm:w-11" /><span className="text-xl font-semibold tracking-tight sm:text-2xl">EquiRoute</span></a><nav className="hidden items-center gap-7 text-sm muted md:flex"><a href="#workspace" className="hover:text-white">Route</a><a href="#results" className="hover:text-white">Results</a><a href="#simulation" className="hover:text-white">Simulation</a><a href="#wallet" className="hover:text-white">Wallet</a></nav><span className="badge badge-blue">BSC Mainnet · 56</span></header>
+    <section id="top" className="container grid-bg relative overflow-hidden rounded-[28px] border border-white/10 px-6 py-12 sm:px-12 sm:py-20"><div className="pointer-events-none absolute -right-24 -top-32 h-80 w-80 rounded-full bg-blue-500/15 blur-3xl" /><div className="relative max-w-3xl"><div className="eyebrow">Tokenized equity execution intelligence</div><h1 className="mt-5 text-5xl font-semibold tracking-[-.06em] sm:text-7xl">You choose the stock.<br /><span className="bg-gradient-to-r from-cyan-200 via-blue-300 to-violet-300 bg-clip-text text-transparent">EquiRoute chooses how you own it.</span></h1><p className="mt-7 max-w-2xl text-base leading-8 muted sm:text-lg">Compare canonical tokenized-stock representations, apply deterministic policy, simulate execution, and review the best compliant route — before anything can move.</p><div className="mt-8 flex flex-wrap gap-2"><span className="badge badge-blue">Live quotes</span><span className="badge badge-gray">Deterministic policy</span><span className="badge badge-gray">Non-custodial review</span></div></div></section>
+    <section className="container mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Feature title="Deterministic Routing" text="Objective execution-quality comparison across canonical representations." icon="↗" /><Feature title="Wrapper Comparison" text="Normalized equity exposure across bStock, Ondo, and xStock." icon="◈" /><Feature title="Pre-Execution Simulation" text="Build and simulate before any execution decision." icon="◇" /><Feature title="Agentic Wallet Boundary" text="Wallet identity, limits, and security remain separate." icon="⌁" /></section>
+    <section id="workspace" className="container mt-10"><ExposureForm loading={loading} onLoading={setLoading} onError={setError} onResult={(next) => { setResult(next); setPreparation(null); setError(""); void findPolicy({ ticker: next.intent.ticker, notionalUsd: next.intent.notionalUsd, userWalletAddress: next.intent.userWalletAddress ?? undefined }); }} onPrepare={prepare} /></section>
+    <section id="wallet" className="container mt-6"><AgenticWalletPanel state={wallet} onReview={() => void reviewExecution()} reviewLoading={walletLoading} /></section>
+    {error && <div className="container mt-5"><div className="panel-soft border-rose-300/20 bg-rose-300/5 p-4 text-sm text-rose-100">{error}</div></div>}
+    <section id="results" className="container mt-12"><div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="eyebrow">Decision surface</div><div className="mt-2 flex flex-wrap items-center gap-3"><h2 className="text-3xl font-semibold tracking-tight">Route Results</h2>{result?.marketContext?.regime && <span className="badge badge-blue">{result.marketContext.regime}</span>}{result && <span className="badge badge-green">LIVE</span>}</div><p className="mt-2 text-sm muted">Best route based on live executable data, normalized exposure, and active policy.</p>{result && <p className="mt-2 text-xs muted">{marketUpdatedAt(result) ? `Updated ${marketUpdatedAt(result)}` : "Live response received"}</p>}</div>{result && <span className="badge badge-green">{result.representationsEvaluated} representations evaluated</span>}</div><RouteResults quotes={result?.quotes ?? []} selectedProvider={result?.selected?.provider} /></section>
+    <section className="container mt-6 grid gap-5 lg:grid-cols-2"><PolicyCard decision={policy} /><div id="simulation"><SimulationCard preparation={preparation} /></div></section>
+    {result?.receipt && <section className="container mt-6 panel p-6"><div className="eyebrow">Audit trail</div><h2 className="mt-2 text-2xl font-semibold">Why this route?</h2><ul className="mt-4 grid gap-2 text-sm muted sm:grid-cols-2">{result.receipt.why.map((reason, index) => <li key={index} className="rounded-lg bg-white/[.03] p-3">{reason}</li>)}</ul></section>}
+    {gate?.executionProposal && <section className="container mt-6 panel p-6"><div className="eyebrow">Non-authorizing handoff</div><h2 className="mt-2 text-2xl font-semibold">Execution Proposal</h2><div className="mt-5 grid gap-3 text-sm sm:grid-cols-2"><div><span className="muted">Wallet quote</span><p className="mt-1">{gate.reconciliation?.agenticWallet.outputTokenAmount ?? "—"} output · {gate.reconciliation?.agenticWallet.estimatedUnderlyingShares ?? "—"} shares</p></div><div><span className="muted">Reconciliation</span><p className="mt-1">{gate.reconciliation?.outcome ?? "—"} · {gate.reconciliation?.deviationPercent ?? "—"}% deviation</p></div><div><span className="muted">Security</span><p className="mt-1">{gate.security?.status ?? "—"}{gate.security?.acknowledgmentRequired ? " · acknowledgment required" : ""}</p></div><div><span className="muted">Authorization</span><p className="mt-1 font-semibold text-amber-200">NONE</p></div></div><p className="mt-5 text-xs muted">Reference {gate.executionProposal.id} · expires {gate.executionProposal.freshUntil}</p></section>}
+    <section className="container mt-12"><div className="mb-5"><div className="eyebrow">System state</div><h2 className="mt-2 text-2xl font-semibold">Execution Pipeline</h2><p className="mt-2 text-sm muted">Stages reflect actual application state — never a decorative success path.</p></div><ExecutionPipeline stages={pipeline} /></section>
+    <footer className="container py-12 text-xs muted">EquiRoute · deterministic tokenized-equity routing · review before execution</footer>
+  </main>;
 }
+function Feature({ title, text, icon }: { title: string; text: string; icon: string }) { return <article className="panel-soft p-5"><div className="text-xl text-cyan-200">{icon}</div><h3 className="mt-4 text-sm font-semibold">{title}</h3><p className="mt-2 text-xs leading-5 muted">{text}</p></article>; }
